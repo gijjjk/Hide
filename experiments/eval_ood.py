@@ -488,7 +488,8 @@ def make_figure(train: dict, test: dict, train_grid: int, test_grid: int,
         f"episodes={args.episodes}  samples={args.samples}  horizon={args.horizon}  "
         f"ask={args.ask}  seed={args.seed}  |  "
         f"{Path(args.checkpoint).name}"
-        + (f"  abstain={args.abstain}" if args.enable_abstain else ""),
+        + (f"  abstain={args.abstain}" if args.enable_abstain else "")
+        + getattr(args, "belief_note", ""),
         fontsize=9,
         color=INK_MUTED,
         ha="left",
@@ -518,6 +519,18 @@ def main():
         raise SystemExit(
             "该 checkpoint 没有 ask_head；请用 steps/02_world_model.py --learned-ask 重新训练"
         )
+    if ckpt_config.get("use_belief_supervision", True) is False:
+        if args.ask in ("entropy", "voi") or (
+            args.enable_abstain and args.abstain in ("entropy", "voi")
+        ):
+            raise SystemExit(
+                "该 checkpoint 的信念头没有用 goal 标签训练，熵/VOI 门控不可用"
+            )
+        print(
+            "提示：该 checkpoint 的信念头未使用 goal 标签训练；"
+            "belief_acc/brier/entropy 只是该头的监控值。"
+        )
+        args.belief_note = "  (belief head untrained)"
 
     train_summary = eval_condition(model, args.train_grid, args, "train")
     test_summary = eval_condition(model, args.test_grid, args, "test")

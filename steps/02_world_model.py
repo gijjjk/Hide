@@ -113,6 +113,11 @@ def parse_args():
         default=20.0,
         help="ask_head 输入成本的缩放系数（1/0.05=20，仅 --learned-ask 时生效）",
     )
+    p.add_argument(
+        "--no-belief-supervision",
+        action="store_true",
+        help="信念头不使用 goal 标签训练（任务 4 消融）",
+    )
     p.add_argument("--smoke", action="store_true", help="几十步跑通流程，不追求效果")
     p.add_argument(
         "--out",
@@ -146,6 +151,8 @@ def main():
         suffix += "_abstain"
     if args.learned_ask:
         suffix += "_askhead"
+    if args.no_belief_supervision:
+        suffix += "_nobelief"
     if args.out is None:
         args.out = f"experiments/checkpoints/world_model{suffix}.pt"
     if args.metrics_out is None:
@@ -199,9 +206,11 @@ def main():
         use_decoder=not args.no_decoder,
         use_ask_head=args.learned_ask,
         ask_cost_scale=args.ask_cost_scale if args.learned_ask else 1.0,
+        use_belief_supervision=not args.no_belief_supervision,
     )
     print(f"\n模型参数量（可训练）：{count_parameters(model):,}")
     print(f"是否使用观测解码器：{not args.no_decoder}")
+    print(f"信念头是否使用 goal 标签：{not args.no_belief_supervision}")
     print()
 
     # ---------- 3. 训练 ----------
@@ -259,6 +268,7 @@ def main():
         "use_decoder": not args.no_decoder,
         "use_ask_head": args.learned_ask,
         "ask_cost_scale": args.ask_cost_scale if args.learned_ask else 1.0,
+        "use_belief_supervision": not args.no_belief_supervision,
     }
     env_config = {
         "grid_size": args.grid_size,

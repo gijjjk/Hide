@@ -418,6 +418,91 @@ python steps/03_plan.py --episodes 100 --samples 32 --horizon 8 \
   `ask_learned_c04.json`、`ask_learned_c10.json`
 - `experiments/logs/ask_compare_askhead_c005.json` 等对应的规则策略对比
 
+### 5.10 信念头消融：不使用特权 goal 标签（任务 4）
+
+信念头原本用隐藏门的真实编号 `goal` 做 3 类交叉熵监督。任务 4 保留网络结构和
+初始化，只去掉这项特权监督：`--no-belief-supervision` 会把
+`use_belief_supervision` 设为 `False`，`goal` 不再进入损失，其他损失
+（奖励、价值、JEPA、KL）保持不变。这样可以区分“信念头的结构”与
+“goal 标签监督”各自的作用。
+
+同一份数据、同一个 seed 训练两个模型：
+
+```bash
+python steps/02_world_model.py --episodes 400 --steps 2000 --no-decoder --seed 0 \
+  --out experiments/checkpoints/world_model_belief_control.pt \
+  --metrics-out experiments/logs/world_model_belief_control_metrics.json
+
+python steps/02_world_model.py --episodes 400 --steps 2000 --no-decoder --seed 0 \
+  --no-belief-supervision
+```
+
+输出：
+
+- `experiments/checkpoints/world_model_nobelief.pt`
+- `experiments/logs/world_model_nobelief_metrics.json`
+
+验证集指标：
+
+| 指标 | 有权监督 | 无权监督（消融） |
+|---|---:|---:|
+| `belief_acc` | 0.933 | 0.335 |
+| `brier` | 0.077 | 0.672 |
+| `probe_acc`（从 z 线性解码 goal） | 0.926 | 0.484 |
+| `reward_mae` | 0.067 | 0.058 |
+| `value_mae` | 0.195 | 0.165 |
+| `jepa_cos` | 0.888 | 0.941 |
+| `active_dims` | 2.44 | 1.26 |
+| `effective_rank` | 8.37 | 5.60 |
+
+消融后的信念头停在随机水平（3 类均匀分布的 acc≈1/3、Brier≈2/3），
+潜变量里的 goal 信息也大幅下降（`probe_acc` 0.484，多数类基线 0.424）。
+
+规划评估（7×7，100 局，3 个评估 seed 的均值 ± 样本标准差）：
+
+| 模型 | 询问策略 | 成功率 | 平均回报 | 平均步数 |
+|---|---|---:|---:|---:|
+| 有权监督 | never | 0.707 ± 0.050 | 0.175 ± 0.094 | 26.3 ± 1.8 |
+| 无权监督 | never | 0.797 ± 0.015 | 0.247 ± 0.057 | 22.5 ± 1.8 |
+| 有权监督 | fixed | 0.927 ± 0.006 | 0.561 ± 0.013 | 20.0 ± 0.5 |
+| 无权监督 | fixed | 0.923 ± 0.031 | 0.565 ± 0.054 | 17.3 ± 0.5 |
+
+分布外评估（同一个 checkpoint，7×7 → 10×10，50 局，`--ask never`）：
+
+| 模型 | 网格 | 成功率 | 平均回报 | Brier | 信念熵 |
+|---|---|---:|---:|---:|---:|
+| 有权监督 | 7×7 | 0.740 | 0.245 | 0.714 | 0.653 |
+| 有权监督 | 10×10 | 0.480 | -0.076 | 0.748 | 0.612 |
+| 无权监督 | 7×7 | 0.780 | 0.166 | 0.671 | 1.089 |
+| 无权监督 | 10×10 | 0.500 | -0.137 | 0.668 | 1.088 |
+
+结论与局限：
+
+- 去掉 `goal` 标签监督后，信念头保持随机水平，`z` 也不再线性包含门信息；
+  这说明当前 checkpoint 的显式信念主要来自这项特权监督。
+- 规划表现没有变差：无权监督模型在 `never` 下成功率反而略高
+  （0.797 vs 0.707），在 `fixed` 下两者接近。规划器只使用奖励头和价值头，
+  因此不依赖信念头；显式信念监督不是完成这个任务所必需的。
+- 分布外退化程度接近（成功率约 -0.26 到 -0.28），两种模型都在 10×10 上
+  明显变差。消融模型的 Brier≈2/3、熵≈1.089 是未训练信念头的随机输出，
+  不能当作校准结果解读。
+- 由于信念头没有可用监督，`--ask entropy/voi` 和 `--abstain entropy/voi`
+  在该 checkpoint 上会直接退出；`steps/03_plan.py` 和
+  `experiments/eval_ood.py` 都会检查 `use_belief_supervision`。
+- 每个条件只训练了一个 seed，规划指标用 3 个评估 seed；控制模型在 seed 0
+  的 `never` 成功率 0.700 与历史基线一致。更严格的结论需要多训练 seed。
+
+输出文件：
+
+- `experiments/checkpoints/world_model_belief_control.pt`
+- `experiments/checkpoints/world_model_nobelief.pt`
+- `experiments/logs/belief_control_{never,fixed}.json` 及 `_s1/_s2`
+- `experiments/logs/world_model_nobelief_{never,fixed}.json` 及 `_s1/_s2`
+- `experiments/logs/ood_7to10_seed0_t4_control.json`
+- `experiments/logs/ood_7to10_seed0_nobelief.json`
+- `report/figures/ood_t4_control_compare.png`
+- `report/figures/ood_t4_nobelief_compare.png`
+
 ---
 
 ## 6. 目录结构
@@ -452,6 +537,7 @@ D:\hide\
     test_env_grid.py         # 网格尺寸参数化回归测试
     test_abstain.py          # ABSTAIN 动作与弃权门控测试
     test_learned_ask.py      # 学习型询问门控（ask_head）测试
+    test_belief_ablation.py  # 无 goal 标签监督的信念头测试
     test_shapes.py           # 张量形状/前向/反向/规划器/控制器自检
     test_overfit.py          # 小 batch 过拟合，确认模型能学
   report/

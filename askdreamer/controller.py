@@ -36,6 +36,14 @@ def belief_entropy(probs: torch.Tensor) -> float:
     return float(-(probs * torch.log(probs + 1e-8)).sum(dim=-1).item())
 
 
+def _require_belief_supervision(model) -> None:
+    """熵/VOI 门控要求信念头用 goal 标签训练过。"""
+    if not getattr(model, "use_belief_supervision", True):
+        raise RuntimeError(
+            "该 checkpoint 的信念头没有用 goal 标签训练；熵/VOI 门控不可用"
+        )
+
+
 class NeverAsk:
     name = "never"
 
@@ -63,6 +71,7 @@ class EntropyGate:
             return False
         if env.steps < self.min_steps:
             return False
+        _require_belief_supervision(model)
         probs = belief_probs(model, h, z)
         return belief_entropy(probs) > self.threshold
 
@@ -87,6 +96,7 @@ class VOIGate:
     def should_ask(self, model, h, z, env) -> bool:
         if env.ask_count > 0:
             return False
+        _require_belief_supervision(model)
         probs = belief_probs(model, h, z)
         p_max = max(float(probs.max().item()), 0.05)
         expected_wrong_tries = (1.0 - p_max) / p_max
@@ -229,6 +239,7 @@ class EntropyAbstain:
     def should_abstain(self, model, h, z, env) -> bool:
         if not _can_abstain(env, self.min_steps):
             return False
+        _require_belief_supervision(model)
         probs = belief_probs(model, h, z)
         return belief_entropy(probs) > self.threshold
 
@@ -252,6 +263,7 @@ class VOIAbstain:
     def should_abstain(self, model, h, z, env) -> bool:
         if not _can_abstain(env, 0):
             return False
+        _require_belief_supervision(model)
         probs = belief_probs(model, h, z)
         p_max = max(float(probs.max().item()), 0.05)
         expected_wrong_tries = (1.0 - p_max) / p_max

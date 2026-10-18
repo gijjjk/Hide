@@ -297,6 +297,15 @@ def main():
                 "  python steps/02_world_model.py --learned-ask ..."
             )
             sys.exit(1)
+        if ckpt_config.get("use_belief_supervision", True) is False:
+            if args.ask in ("entropy", "voi") or (
+                args.enable_abstain and args.abstain in ("entropy", "voi")
+            ):
+                print(
+                    "\n该 checkpoint 的信念头没有用 goal 标签训练，"
+                    "熵/VOI 门控不可用。"
+                )
+                sys.exit(1)
         if args.sign_first:
             ask_policy = SignFirstController(ask_policy)
         abstain_policy = (

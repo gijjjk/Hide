@@ -96,6 +96,7 @@ class WorldModel(nn.Module):
         use_decoder: bool = True,
         use_ask_head: bool = False,
         ask_cost_scale: float = 1.0,
+        use_belief_supervision: bool = True,
     ):
         super().__init__()
         self.obs_dim = obs_dim
@@ -108,6 +109,8 @@ class WorldModel(nn.Module):
         self.use_ask_head = use_ask_head
         # 询问成本先乘这个系数再进入 ask_head；训练和推理必须一致
         self.ask_cost_scale = ask_cost_scale
+        # False 时 belief_head 不接收 goal 标签的梯度（任务 4 消融）
+        self.use_belief_supervision = use_belief_supervision
 
         self.encoder = Encoder(obs_dim, e_dim)
 
@@ -308,12 +311,15 @@ class WorldModel(nn.Module):
         r_pred = self.reward_head(torch.cat([feat, a_onehot], dim=-1)).squeeze(-1)
         loss_reward = masked_mean(F.smooth_l1_loss(r_pred, rew, reduction="none"), valid)
 
-        # 2) 隐藏门信念（训练时用特权标签 goal）
+        # 2) 隐藏门信念；use_belief_supervision=False 时只用它做监控，不反传 goal 标签
         logits = self.belief_head(feat)  # (B,L,3)
-        ce = F.cross_entropy(
-            logits.reshape(-1, 3), goal.reshape(-1), reduction="none"
-        ).reshape_as(goal)
-        loss_belief = masked_mean(ce, valid)
+        if self.use_belief_supervision:
+            ce = F.cross_entropy(
+                logits.reshape(-1, 3), goal.reshape(-1), reduction="none"
+            ).reshape_as(goal)
+            loss_belief = masked_mean(ce, valid)
+        else:
+            loss_belief = torch.zeros((), device=obs.device)
 
         # 2b) 价值：用真实回报（return-to-go）监督，给规划器提供稠密信号
         with torch.no_grad():
