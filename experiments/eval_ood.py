@@ -14,6 +14,10 @@
     experiments/logs/ood_7to10_seed0.json
     report/figures/ood_compare.png
 
+启用 ABSTAIN（6 动作 checkpoint）时，额外报告 abstain_rate / coverage /
+selective_success，默认输出到 ood_*_abstain_<gate>.json 和
+report/figures/ood_abstain_compare.png，不会覆盖上面的任务 1 结果。
+
 注意：这是“用 7x7 训练、直接搬到 10x10”的分布外测试，不会重新训练，
 也不会覆盖任何已有 checkpoint 或报告文件。
 """
@@ -37,8 +41,17 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from askdreamer.controller import belief_probs, make_ask_policy
-from askdreamer.env import START_POS, HiddenGoalGrid
+from askdreamer.controller import (
+    belief_probs,
+    make_abstain_policy,
+    make_ask_policy,
+)
+from askdreamer.env import (
+    ABSTAIN_ACTION,
+    ASK_ACTION,
+    START_POS,
+    HiddenGoalGrid,
+)
 from askdreamer.model import WorldModel
 from askdreamer.planner import RandomShootingPlanner
 from askdreamer.train import save_json, seed_everything
@@ -64,6 +77,9 @@ METRIC_LABELS = {
     "avg_ask_count": "平均询问次数",
     "sign_rate": "读告示牌比例",
     "timeout_rate": "超时比例",
+    "abstain_rate": "弃权率",
+    "coverage": "覆盖率（未弃权）",
+    "selective_success": "覆盖率内成功率",
 }
 
 FIGURE_PANELS = [
@@ -100,12 +116,33 @@ def parse_args():
     p.add_argument("--ask-after", type=int, default=0)
     p.add_argument("--ask-cost", type=float, default=-0.05)
     p.add_argument("--wrong-penalty", type=float, default=-0.3)
+    p.add_argument(
+        "--enable-abstain",
+        action="store_true",
+        help="启用第 6 个动作 ABSTAIN（需要 6 动作 checkpoint）",
+    )
+    p.add_argument(
+        "--abstain",
+        type=str,
+        default="never",
+        choices=["never", "entropy", "voi"],
+        help="弃权门控；仅 --enable-abstain 时生效",
+    )
+    p.add_argument("--abstain-threshold", type=float, default=0.5)
+    p.add_argument("--abstain-after", type=int, default=0)
+    p.add_argument("--abstain-margin", type=float, default=0.0)
+    p.add_argument("--abstain-penalty", type=float, default=-0.1)
     p.add_argument("--gamma", type=float, default=0.99)
     p.add_argument("--no-value", action="store_true")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--max-steps", type=int, default=40)
     p.add_argument("--out", type=str, default=None)
-    p.add_argument("--figure", type=str, default="report/figures/ood_compare.png")
+    p.add_argument(
+        "--figure",
+        type=str,
+        default=None,
+        help="默认 ood_compare.png；启用 ABSTAIN 时默认 ood_abstain_compare.png",
+    )
     p.add_argument("--verbose", action="store_true")
     return p.parse_args()
 
@@ -132,7 +169,14 @@ def eval_condition(model: WorldModel, grid_size: int, args, label: str) -> dict:
         wrong_penalty=args.wrong_penalty,
         grid_size=grid_size,
         start_pos=START_POS,
+        enable_abstain=args.enable_abstain,
+        abstain_penalty=args.abstain_penalty,
     )
+    if getattr(model, "n_actions", env.n_actions) != env.n_actions:
+        raise SystemExit(
+            f"checkpoint 动作数（{model.n_actions}）与当前环境（{env.n_actions}）不一致；"
+            "请检查是否需要 --enable-abstain。"
+        )
     planner = RandomShootingPlanner(
         model,
         horizon=args.horizon,
@@ -141,6 +185,16 @@ def eval_condition(model: WorldModel, grid_size: int, args, label: str) -> dict:
         use_value=not args.no_value,
     )
     ask_policy = make_ask_policy(args.ask, args.threshold, args.ask_after)
+    abstain_policy = (
+        make_abstain_policy(
+            args.abstain,
+            args.abstain_threshold,
+            args.abstain_after,
+            args.abstain_margin,
+        )
+        if args.enable_abstain
+        else None
+    )
 
     records = []
     belief_n = 0
@@ -183,7 +237,11 @@ def eval_condition(model: WorldModel, grid_size: int, args, label: str) -> dict:
                 action = ask_policy.override_action(env)
             if action is None:
                 if ask_policy.should_ask(model, h, z, env):
-                    action = 4
+                    action = ASK_ACTION
+                elif abstain_policy is not None and abstain_policy.should_abstain(
+                    model, h, z, env
+                ):
+                    action = ABSTAIN_ACTION
                 else:
                     t0 = time.time()
                     action, _ = planner.act(h, z, msg_t)
@@ -208,6 +266,7 @@ def eval_condition(model: WorldModel, grid_size: int, args, label: str) -> dict:
             "ask_count": int(info["ask_count"]),
             "sign_read": bool(info["sign_read"]),
             "timeout": bool(info["timeout"]),
+            "abstained": bool(info["abstained"]),
             "planner_ms": planner_ms / max(1, planner_calls),
         }
         records.append(record)
@@ -223,6 +282,14 @@ def eval_condition(model: WorldModel, grid_size: int, args, label: str) -> dict:
     def mean(key):
         return float(np.mean([r[key] for r in records])) if n else 0.0
 
+    n_covered = sum(1 for r in records if not r["abstained"])
+    coverage = n_covered / n if n else 0.0
+    selective_success = (
+        sum(1 for r in records if r["success"] and not r["abstained"]) / n_covered
+        if n_covered > 0
+        else 0.0
+    )
+
     summary = {
         "grid_size": grid_size,
         "episodes": n,
@@ -236,16 +303,25 @@ def eval_condition(model: WorldModel, grid_size: int, args, label: str) -> dict:
         "avg_ask_count": mean("ask_count"),
         "sign_rate": mean("sign_read"),
         "timeout_rate": mean("timeout"),
+        "abstain_rate": mean("abstained"),
+        "coverage": coverage,
+        "selective_success": selective_success,
         "n_belief_samples": belief_n,
         "avg_planner_ms_per_step": mean("planner_ms"),
         "total_seconds": round(time.time() - t_start, 2),
         "per_episode": records,
     }
+    abstain_note = (
+        f"  abstain_rate={summary['abstain_rate']:.3f}  "
+        f"coverage={summary['coverage']:.3f}"
+        if args.enable_abstain
+        else ""
+    )
     print(
         f"[{label}] success={summary['success_rate']:.3f}  "
         f"return={summary['avg_return']:+.3f}  steps={summary['avg_steps']:.1f}  "
         f"belief_acc={summary['belief_acc']:.3f}  brier={summary['brier']:.3f}  "
-        f"ask_rate={summary['ask_rate']:.3f}"
+        f"ask_rate={summary['ask_rate']:.3f}" + abstain_note
     )
     return summary
 
@@ -277,6 +353,13 @@ def print_comparison(train: dict, test: dict, train_grid: int, test_grid: int):
             f"{METRIC_LABELS.get(key, key):<20} {a:>16.4f} {b:>16.4f} "
             f"{b - a:>+14.4f}"
         )
+    if train.get("abstain_rate", 0.0) > 0 or test.get("abstain_rate", 0.0) > 0:
+        for key in ["abstain_rate", "coverage", "selective_success"]:
+            a, b = float(train[key]), float(test[key])
+            print(
+                f"{METRIC_LABELS.get(key, key):<20} {a:>16.4f} {b:>16.4f} "
+                f"{b - a:>+14.4f}"
+            )
     print("=" * 78)
     print(f"信念采样步数：train={train['n_belief_samples']}, test={test['n_belief_samples']}")
     print("参考值：均匀信念下 belief_acc=1/3≈0.333，Brier=2/3≈0.667")
@@ -290,7 +373,12 @@ def make_figure(train: dict, test: dict, train_grid: int, test_grid: int,
     )
     xlabels = [f"{train_grid}x{train_grid}", f"{test_grid}x{test_grid}"]
 
-    for ax, (key, title, is_rate) in zip(axes.flat, FIGURE_PANELS):
+    panels = list(FIGURE_PANELS)
+    if args.enable_abstain:
+        # 启用 ABSTAIN 时，最后一格改为弃权率；询问率仍保留在 JSON 和控制台。
+        panels[-1] = ("abstain_rate", "Abstain rate", True)
+
+    for ax, (key, title, is_rate) in zip(axes.flat, panels):
         ax.set_facecolor(SURFACE)
         values = [float(train[key]), float(test[key])]
         ax.bar(
@@ -362,6 +450,14 @@ def make_figure(train: dict, test: dict, train_grid: int, test_grid: int,
                 fontsize=8.5,
                 color=INK_MUTED,
             )
+        if key == "abstain_rate" and max(values) == 0:
+            ax.annotate(
+                f"no abstaining (gate={args.abstain})",
+                (0.5, 0.12),
+                ha="center",
+                fontsize=8.5,
+                color=INK_MUTED,
+            )
 
     handles = [
         plt.Rectangle((0, 0), 1, 1, facecolor=COLOR_TRAIN, edgecolor="none"),
@@ -391,7 +487,8 @@ def make_figure(train: dict, test: dict, train_grid: int, test_grid: int,
         1.0,
         f"episodes={args.episodes}  samples={args.samples}  horizon={args.horizon}  "
         f"ask={args.ask}  seed={args.seed}  |  "
-        f"{Path(args.checkpoint).name}",
+        f"{Path(args.checkpoint).name}"
+        + (f"  abstain={args.abstain}" if args.enable_abstain else ""),
         fontsize=9,
         color=INK_MUTED,
         ha="left",
@@ -424,7 +521,7 @@ def main():
     print_comparison(train_summary, test_summary, args.train_grid, args.test_grid)
 
     comparison = {}
-    for key in [
+    comparison_keys = [
         "success_rate",
         "avg_return",
         "avg_steps",
@@ -435,14 +532,23 @@ def main():
         "avg_ask_count",
         "sign_rate",
         "timeout_rate",
-    ]:
+        "abstain_rate",
+        "coverage",
+        "selective_success",
+    ]
+    for key in comparison_keys:
         a = float(train_summary[key])
         b = float(test_summary[key])
         comparison[key] = {"train": a, "test": b, "delta": b - a}
 
     out_path = Path(
         args.out
-        or f"experiments/logs/ood_{args.train_grid}to{args.test_grid}_seed{args.seed}.json"
+        or (
+            f"experiments/logs/ood_{args.train_grid}to{args.test_grid}"
+            f"_seed{args.seed}"
+            + (f"_abstain_{args.abstain}" if args.enable_abstain else "")
+            + ".json"
+        )
     )
     payload = {
         "args": vars(args),
@@ -461,13 +567,18 @@ def main():
     save_json(out_path, payload)
     print(f"已保存指标：{out_path.resolve()}")
 
+    figure_path = args.figure or (
+        "report/figures/ood_abstain_compare.png"
+        if args.enable_abstain
+        else "report/figures/ood_compare.png"
+    )
     make_figure(
         train_summary,
         test_summary,
         args.train_grid,
         args.test_grid,
         args,
-        args.figure,
+        figure_path,
     )
 
 

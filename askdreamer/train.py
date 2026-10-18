@@ -53,7 +53,7 @@ def train_world_model(
     history = []
     t0 = time.time()
 
-    # 打印一次 batch 的 shape，方便你理解数据
+    # 打印一个 batch 的 shape
     first_batch = dataset.sample_batch(batch_size)
     print("一个 batch 的 shape：")
     for key, value in first_batch.items():

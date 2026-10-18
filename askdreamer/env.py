@@ -1,10 +1,5 @@
 """
-HiddenGoalGrid：一个很小的“部分可观测 + 隐藏信息 + 主动询问”环境。
-
-为什么自己写环境？
-- 你的电脑只有 CPU，网格世界几秒钟就能跑几百局；
-- 逻辑全在 Python 里，你能一行一行看懂；
-- 隐藏门（goal）不会出现在观测里，所以“猜哪扇门对”必须靠历史、告示牌或主动询问。
+HiddenGoalGrid：部分可观测的隐藏目标网格环境。
 
 坐标约定：使用 (row, col)，左上角是 (0, 0)。row 向下增大，col 向右增大。
 """
@@ -21,6 +16,13 @@ OBS_DIM = VIEW_SIZE * VIEW_SIZE * N_CHANNELS   # 150
 MSG_DIM = 6            # 消息通道：前 3 维=告示牌消去的门，后 3 维=oracle 答案
 N_ACTIONS = 5          # 0..3 移动，4=ASK
 ACTION_NAMES = ("up", "down", "left", "right", "ASK")
+ACTION_NAMES_WITH_ABSTAIN = ACTION_NAMES + ("ABSTAIN",)
+
+# ABSTAIN 只在 enable_abstain=True 时启用的第 6 个动作。
+# 单独保留 N_ACTIONS=5，旧 checkpoint / 旧命令的行为完全不变。
+ASK_ACTION = 4
+ABSTAIN_ACTION = 5
+N_ACTIONS_WITH_ABSTAIN = 6
 
 
 def _default_door_positions(grid_size: int):
@@ -48,7 +50,9 @@ class HiddenGoalGrid:
     智能体看不到 goal；它可以：
       1. 走到告示牌 S 上，消去一扇错误的门（消息通道前 3 维）；
       2. 花一步 + 询问代价执行 ASK，oracle 直接告诉它正确的门（消息通道后 3 维）；
-      3. 走到某扇门上：正确则 +1 并结束，错误则 -0.3 且该门变成墙。
+      3. 走到某扇门上：正确则 +1 并结束，错误则 -0.3 且该门变成墙；
+      4. 如果 enable_abstain=True，还可以执行 ABSTAIN（动作 5）：立即结束本局，
+         不拿成功奖励、不触发错门罚分，只付 abstain_penalty。
 
     注意：goal 不会进入 150 维观测。它只出现在 info["goal"] 里，
     训练世界模型时可以把它当作“特权标签”来监督信念头，但测试时智能体只能靠历史推断。
@@ -65,6 +69,8 @@ class HiddenGoalGrid:
         grid_size: int = GRID_SIZE,
         door_positions=None,
         start_pos: tuple[int, int] = START_POS,
+        enable_abstain: bool = False,
+        abstain_penalty: float = -0.1,
     ):
         if grid_size < 5:
             raise ValueError(f"grid_size 至少为 5，收到 {grid_size}")
@@ -96,9 +102,11 @@ class HiddenGoalGrid:
         self.grid_size = grid_size
         self.door_positions = doors
         self.start_pos = tuple(start_pos)
+        self.enable_abstain = enable_abstain
+        self.abstain_penalty = abstain_penalty
         self.obs_dim = OBS_DIM
         self.msg_dim = MSG_DIM
-        self.n_actions = N_ACTIONS
+        self.n_actions = N_ACTIONS_WITH_ABSTAIN if enable_abstain else N_ACTIONS
 
         # 下面这些变量会在 reset() 里被重新赋值
         self.goal = 0
@@ -110,6 +118,7 @@ class HiddenGoalGrid:
         self.steps = 0
         self.done = False
         self.ask_count = 0
+        self.abstained = False
 
     # ---------- 基本查询 ----------
     def door_at(self, row: int, col: int):
@@ -177,6 +186,7 @@ class HiddenGoalGrid:
         self.steps = 0
         self.done = False
         self.ask_count = 0
+        self.abstained = False
 
         # 告示牌随机放在内部格子，但不能和起点或门重合
         excluded = set(self.door_positions)
@@ -207,14 +217,21 @@ class HiddenGoalGrid:
             "sign_read": False,
             "success": False,
             "timeout": False,
+            "abstained": False,
         }
 
-        if action == 4:
+        if action == ASK_ACTION:
             # ASK：不移动，花一步和一点奖励，oracle 把正确门写进消息通道
             self.ask_count += 1
             self.msg[3 + self.goal] = 1.0
             reward += self.ask_cost
             info["asked"] = True
+        elif action == ABSTAIN_ACTION:
+            # ABSTAIN：显式放弃本局，避免冒险撞错门，但拿不到成功奖励。
+            self.abstained = True
+            self.done = True
+            reward += self.abstain_penalty
+            info["abstained"] = True
         else:
             dr, dc = _MOVES[action]
             nr, nc = self.agent_pos[0] + dr, self.agent_pos[1] + dc
@@ -261,6 +278,7 @@ class HiddenGoalGrid:
         info["ask_count"] = self.ask_count
         info["sign_pos"] = self.sign_pos
         info["sign_read"] = self.sign_read
+        info["abstained"] = self.abstained
 
         return self.observe(), self.msg.copy(), float(reward), self.done, info
 

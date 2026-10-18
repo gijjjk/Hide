@@ -10,9 +10,14 @@
 冒烟测试（1 分钟内）：
     python steps/02_world_model.py --smoke
 
+启用 ABSTAIN（6 动作，训练新 checkpoint；旧 5 动作权重不兼容）：
+    python steps/02_world_model.py --enable-abstain --episodes 400 --steps 2000 \
+      --no-decoder
+
 输出：
     experiments/checkpoints/world_model.pt
     experiments/logs/world_model_metrics.json
+    （启用 ABSTAIN 时默认是 world_model_abstain.pt / world_model_abstain_metrics.json）
 """
 
 from __future__ import annotations
@@ -30,7 +35,12 @@ sys.stdout.reconfigure(encoding="utf-8")
 sys.stderr.reconfigure(encoding="utf-8")
 
 from askdreamer.data import EpisodeDataset, collect_episodes
-from askdreamer.env import MSG_DIM, N_ACTIONS, OBS_DIM
+from askdreamer.env import (
+    MSG_DIM,
+    N_ACTIONS,
+    N_ACTIONS_WITH_ABSTAIN,
+    OBS_DIM,
+)
 from askdreamer.model import WorldModel
 from askdreamer.train import (
     count_parameters,
@@ -55,9 +65,39 @@ def parse_args():
     p.add_argument("--grid-size", type=int, default=7, help="环境边长（默认 7x7）")
     p.add_argument("--max-steps", type=int, default=40, help="每局最大步数")
     p.add_argument("--no-decoder", action="store_true", help="关闭观测解码器（H1 研究版本）")
+    p.add_argument(
+        "--enable-abstain",
+        action="store_true",
+        help="启用第 6 个动作 ABSTAIN（默认关闭，关闭时动作空间仍是 5，旧 checkpoint 兼容）",
+    )
+    p.add_argument(
+        "--abstain-prob",
+        type=float,
+        default=0.15,
+        help="脚本策略在信息不足且门口时选择 ABSTAIN 的概率",
+    )
+    p.add_argument(
+        "--abstain-penalty", type=float, default=-0.1, help="ABSTAIN 的额外奖励代价（负数）"
+    )
+    p.add_argument(
+        "--random-abstain-prob",
+        type=float,
+        default=0.05,
+        help="随机策略每个非脚本步选择 ABSTAIN 的概率（仅 6 动作模式）",
+    )
     p.add_argument("--smoke", action="store_true", help="几十步跑通流程，不追求效果")
-    p.add_argument("--out", type=str, default="experiments/checkpoints/world_model.pt")
-    p.add_argument("--metrics-out", type=str, default="experiments/logs/world_model_metrics.json")
+    p.add_argument(
+        "--out",
+        type=str,
+        default=None,
+        help="默认 world_model.pt；启用 ABSTAIN 时默认 world_model_abstain.pt",
+    )
+    p.add_argument(
+        "--metrics-out",
+        type=str,
+        default=None,
+        help="默认 world_model_metrics.json；启用 ABSTAIN 时默认 world_model_abstain_metrics.json",
+    )
     return p.parse_args()
 
 
@@ -72,7 +112,16 @@ def main():
         args.log_every = 5
         args.eval_batches = 2
 
-    # CPU：留一个核给系统，避免桌面卡死
+    # 默认输出：启用 ABSTAIN 时换新文件，绝不覆盖旧的 5 动作 checkpoint
+    suffix = "_abstain" if args.enable_abstain else ""
+    if args.out is None:
+        args.out = f"experiments/checkpoints/world_model{suffix}.pt"
+    if args.metrics_out is None:
+        args.metrics_out = f"experiments/logs/world_model{suffix}_metrics.json"
+
+    n_actions = N_ACTIONS_WITH_ABSTAIN if args.enable_abstain else N_ACTIONS
+
+    # 限制 PyTorch 线程数，保留一个核给系统
     torch.set_num_threads(3)
     seed_everything(args.seed)
 
@@ -91,6 +140,10 @@ def main():
         policy=args.policy,
         max_steps=args.max_steps,
         grid_size=args.grid_size,
+        enable_abstain=args.enable_abstain,
+        abstain_prob=args.abstain_prob,
+        abstain_penalty=args.abstain_penalty,
+        random_abstain_prob=args.random_abstain_prob,
     )
     print(f"收集完成，用时 {time.time() - t0:.1f} 秒，共 {len(episodes)} 局。")
 
@@ -105,7 +158,7 @@ def main():
     model = WorldModel(
         obs_dim=OBS_DIM,
         msg_dim=MSG_DIM,
-        n_actions=N_ACTIONS,
+        n_actions=n_actions,
         use_decoder=not args.no_decoder,
     )
     print(f"\n模型参数量（可训练）：{count_parameters(model):,}")
@@ -157,11 +210,17 @@ def main():
     config = {
         "obs_dim": OBS_DIM,
         "msg_dim": MSG_DIM,
-        "n_actions": N_ACTIONS,
+        "n_actions": n_actions,
         "e_dim": 64,
         "h_dim": 96,
         "z_dim": 16,
         "use_decoder": not args.no_decoder,
+    }
+    env_config = {
+        "grid_size": args.grid_size,
+        "max_steps": args.max_steps,
+        "enable_abstain": args.enable_abstain,
+        "abstain_penalty": args.abstain_penalty,
     }
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -169,6 +228,7 @@ def main():
         {
             "model_state": model.state_dict(),
             "config": config,
+            "env_config": env_config,
             "args": vars(args),
         },
         out_path,
@@ -178,6 +238,7 @@ def main():
     payload = {
         "args": vars(args),
         "config": config,
+        "env_config": env_config,
         "num_parameters": count_parameters(model),
         "train_seconds": round(train_seconds, 1),
         "eval": eval_metrics,

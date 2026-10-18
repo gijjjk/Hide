@@ -27,7 +27,7 @@
 - 智能体只能看到以自己为中心的 **5×5 局部视野**；
 - 观测是 **5×5×6 = 150 维**向量（墙、门 0/1/2、告示牌、自己），不是图片；
 - 另有一条独立的 **6 维消息通道**：前 3 维是告示牌排除的门，后 3 维是 oracle 的回答；
-- 动作 5 个：上/下/左/右/**ASK**；
+- 动作 5 个：上/下/左/右/**ASK**（启用 ABSTAIN 时额外增加第 6 个动作，默认关闭）；
 - 正确门 +1；错误门 −0.3 并变成墙；每步 −0.01；ASK 额外 −0.05；40 步超时再 −0.1；
 - 告示牌会排除一扇错误门，所以“问不问”不总是显然的。
 
@@ -42,7 +42,7 @@
 观测 o_t (150) ──► Encoder ──► e_t (64)
                                   │
 消息 m_t (6) ─────────────┐       │
-动作 a_{t-1} (5) ─────────┼──► GRU ──► h_t (96)
+动作 a_{t-1} (5/6) ───────┼──► GRU ──► h_t (96)
 潜变量 z_{t-1} (16) ──────┘             │
                                         ├── prior   p(z_t | h_t)
                                         ├── posterior q(z_t | h_t, e_t)   （训练时）
@@ -259,6 +259,94 @@ python experiments/eval_ood.py --episodes 3 --samples 8 --horizon 4 \
   --out experiments/logs/_ood_smoke.json --figure report/figures/_ood_smoke.png
 ```
 
+### 5.8 ABSTAIN 动作（任务 2）
+
+ABSTAIN 是可选的第 6 个动作（`enable_abstain=True`，动作编号 5）：
+
+- 立即结束本局，`done=True`；
+- 不拿成功奖励，也不触发错门罚分；
+- 只付 `step_penalty + abstain_penalty`（默认 `-0.01 + -0.1`）。
+
+默认关闭，此时动作空间仍是 5，旧 checkpoint 和旧命令完全兼容。
+启用后动作空间为 6，**旧的 5 动作 checkpoint 不能用于 6 动作环境**，反之亦然；
+`steps/03_plan.py` 和 `experiments/eval_ood.py` 会检查 `config["n_actions"]` 并在不匹配时退出。
+
+训练 6 动作世界模型（不会覆盖旧的 `world_model.pt` / `world_model_nodec.pt`）：
+
+```bash
+python steps/02_world_model.py --enable-abstain --episodes 400 --steps 2000 \
+  --no-decoder --seed 0 --abstain-prob 0.05 --random-abstain-prob 0.02
+```
+
+输出：
+
+- `experiments/checkpoints/world_model_abstain.pt`
+- `experiments/logs/world_model_abstain_metrics.json`
+
+评估三种弃权门控（`never / entropy / voi`）：
+
+```bash
+python steps/03_plan.py --episodes 100 --samples 32 --horizon 8 --ask never \
+  --enable-abstain --abstain entropy --abstain-threshold 1.0 \
+  --checkpoint experiments/checkpoints/world_model_abstain.pt \
+  --out experiments/logs/abstain_entropy_t10.json
+```
+
+新增指标：
+
+- `abstain_rate`：弃权局数 / 总局数；
+- `coverage`：未弃权局数 / 总局数；
+- `selective_success`：未弃权局中的成功率。
+
+seed 0，100 局，7×7，无解码器：
+
+| 配置 | 成功率 | 弃权率 | 覆盖率 | 覆盖率内成功率 |
+|---|---:|---:|---:|---:|
+| 5 动作基线（`world_model_nodec.pt`） | 0.700 | 0.000 | 1.000 | 0.700 |
+| 6 动作，`--abstain never` | 0.480 | 0.000 | 1.000 | 0.480 |
+| 6 动作，熵门控 τ=0.5 | 0.080 | 0.680 | 0.320 | 0.250 |
+| 6 动作，熵门控 τ=0.8 | 0.300 | 0.260 | 0.740 | 0.405 |
+| 6 动作，熵门控 τ=1.0 | 0.410 | 0.070 | 0.930 | 0.441 |
+| 6 动作，VOI 门控（margin=0） | 0.140 | 0.590 | 0.410 | 0.341 |
+| 6 动作，VOI 门控（margin=0.2） | 0.400 | 0.040 | 0.960 | 0.417 |
+| 6 动作，VOI 门控（margin=0.5） | 0.480 | 0.000 | 1.000 | 0.480 |
+
+seed 1 的 `--abstain never` 成功率为 0.460，与 seed 0 的 0.480 接近。
+
+结论与局限：
+
+- 机制本身可用：ABSTAIN 能正确终止回合、改变动作空间，训练和评估都能区分
+  `abstain_rate / coverage / selective_success`。
+- **规则门控没有带来选择性收益**：所有会弃权的配置，其覆盖率内成功率都低于
+  “从不弃权”的 0.480；阈值越松，弃权越多，总成功率越低。
+- 6 动作模型本身比 5 动作基线弱（0.480 vs 0.700）。同预算下重新初始化会改变
+  参数随机流；即使使用完全相同的 5 动作数据训练 6 动作模型，成功率也只有 0.47 左右。
+  因此 6 动作与 5 动作之间的差距不能全部归因于 ABSTAIN。
+- 为了让 6 动作数据保留足够多的成功样本，训练时把弃权概率压得很低
+  （脚本 0.05，随机 0.02）。ABSTAIN 转移很少，世界模型对动作 5 的奖励预测不可靠；
+  当前的弃权门控都是规则式，不依赖该预测。
+
+分布外结果（同一个 6 动作 checkpoint，7×7 → 10×10，50 局）：
+
+| 配置 | 网格 | 成功率 | Brier | 信念熵 | 弃权率 |
+|---|---|---:|---:|---:|---:|
+| `never` | 7×7 | 0.460 | 0.905 | 0.463 | 0.000 |
+| `never` | 10×10 | 0.260 | 1.012 | 0.453 | 0.000 |
+| 熵门控 τ=1.0 | 7×7 | 0.340 | 0.897 | 0.474 | 0.120 |
+| 熵门控 τ=1.0 | 10×10 | 0.140 | 1.084 | 0.423 | 0.020 |
+
+分布外时 Brier 明显变差、成功率下降，但**信念熵没有上升，弃权率反而下降**。
+也就是说，信念头在分布外更多是“自信地错”，而不是“知道自己不知道”；
+基于信念熵的 ABSTAIN 门控因此无法检测分布外。这是任务 2 的主要负结果。
+
+输出文件：
+
+- `experiments/logs/abstain_*.json`
+- `experiments/logs/ood_7to10_seed0_abstain_never.json`
+- `experiments/logs/ood_7to10_seed0_abstain_entropy.json`
+- `report/figures/ood_abstain_never_compare.png`
+- `report/figures/ood_abstain_compare.png`
+
 ---
 
 ## 6. 目录结构
@@ -290,6 +378,8 @@ D:\hide\
     logs/                    # 每个配置一个 JSON
   tests/
     test_env.py              # 环境自检（9 项）
+    test_env_grid.py         # 网格尺寸参数化回归测试
+    test_abstain.py          # ABSTAIN 动作与弃权门控测试
     test_shapes.py           # 张量形状/前向/反向/规划器/控制器自检
     test_overfit.py          # 小 batch 过拟合，确认模型能学
   report/
@@ -368,6 +458,8 @@ D:\hide\
 - 行为数据主要来自脚本策略 + 随机策略，不是完全自主学习。
 - 信念头训练时用了 `goal` 特权标签，测试时只能靠历史/消息；报告里明确写了这一点。
 - 询问控制器是**规则版**（熵/VOI），不是学习出来的；`sign_first` 也是规则式探索先验。
+- ABSTAIN 门控同样是规则版；在 7×7 和 10×10 上，信念熵都没有区分“会成功”和“会失败”的局，
+  弃权反而降低了总成功率（见 5.8）。
 - 世界模型在 `ask_cost=-0.05` 的数据上训练，H3 的高成本（−0.40）评估存在奖励/价值尺度偏移；规划动作排序不受常数偏移影响，但回报绝对值要谨慎比较。
 - 每个配置只有 3 个 seed、30–50 局，方差不小；结论看趋势，不要过度解读小数点。
 - 没有训练 actor-critic / 策略蒸馏；没有语言输入输出。

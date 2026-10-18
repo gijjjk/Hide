@@ -1,13 +1,9 @@
 """
 AskDreamer 的世界模型：编码器 + RSSM-lite + 奖励/信念/JEPA 头（可选解码器）。
 
-关键设计：
-- 观测 150 维进入编码器；oracle 答案/告示牌走独立的 6 维消息通道进入 GRU。
-  这样信念头不能直接从观测里“抄答案”，H3 的实验才有效。
-- 主模型不重建观测；`use_decoder=True` 只用于 1a 对照和排查坍塌。
-- 潜变量 z 是 16 维高斯；训练用 posterior，想象/规划用 prior。
-
-所有张量 shape 都在注释里标出，方便你调试。
+- 观测为 150 维，进入编码器；6 维消息通道与上一动作一起进入 GRU。
+- 潜变量 z 为 16 维高斯；训练使用 posterior，想象和规划使用 prior。
+- 张量 shape 在各函数注释中标出。
 """
 
 from __future__ import annotations

@@ -1,10 +1,7 @@
 """
 数据收集与序列采样。
 
-为什么不用 gym / DataLoader？
-- 环境很小，自己写更直观；
-- 你能清楚看到每一条数据是怎么来的；
-- 避免额外依赖和 Windows 上的多进程问题。
+包含脚本策略、episode 收集和固定长度训练序列采样。
 """
 
 from __future__ import annotations
@@ -12,9 +9,9 @@ from __future__ import annotations
 import numpy as np
 
 from .env import (
+    ABSTAIN_ACTION,
     GRID_SIZE,
     MSG_DIM,
-    N_ACTIONS,
     OBS_DIM,
     START_POS,
     HiddenGoalGrid,
@@ -22,7 +19,7 @@ from .env import (
 
 
 class ScriptedPolicy:
-    """一个很笨但有用的脚本策略，用来收集“会走到门、会询问、会读告示牌”的数据。
+    """按固定规则收集数据，覆盖走到门、询问和读取告示牌三类行为。
 
     它不使用 oracle 答案，只是按固定规则行动：
     - 第一步以 ask_prob 的概率 ASK；
@@ -30,11 +27,19 @@ class ScriptedPolicy:
     - 否则走向一扇还没被证明错误的门。
     """
 
-    def __init__(self, rng: np.random.Generator, ask_prob: float = 0.5, sign_prob: float = 0.3):
+    def __init__(
+        self,
+        rng: np.random.Generator,
+        ask_prob: float = 0.5,
+        sign_prob: float = 0.3,
+        abstain_prob: float = 0.0,
+    ):
         self.rng = rng
         self.ask_prob = ask_prob
         self.visit_sign = bool(rng.random() < sign_prob)
         self.asked = False
+        self.abstain_prob = abstain_prob
+        self.abstained = False
         self.target = None
 
     def act(self, env: HiddenGoalGrid) -> int:
@@ -42,6 +47,19 @@ class ScriptedPolicy:
         if not self.asked and env.steps == 0 and self.rng.random() < self.ask_prob:
             self.asked = True
             return 4  # ASK
+
+        # 信息不足且马上要撞门时，按概率选择 ABSTAIN（只在 6 动作模式下）
+        if (
+            env.enable_abstain
+            and self.abstain_prob > 0
+            and not self.abstained
+            and env.ask_count == 0
+            and not env.sign_read
+            and self._adjacent_to_unknown_door(env)
+            and self.rng.random() < self.abstain_prob
+        ):
+            self.abstained = True
+            return ABSTAIN_ACTION
 
         # 先去看告示牌（如果这局决定去的话）
         if self.visit_sign and not env.sign_read:
@@ -56,6 +74,15 @@ class ScriptedPolicy:
         if self.target is None or self.target not in available:
             self.target = int(self.rng.choice(available))
         return self._move_towards(env.agent_pos, env.door_positions[self.target])
+
+    @staticmethod
+    def _adjacent_to_unknown_door(env: HiddenGoalGrid) -> bool:
+        """智能体是否正站在某扇尚未排除的门旁边。"""
+        r, c = env.agent_pos
+        for k, (dr, dc) in enumerate(env.door_positions):
+            if env.door_status[k] != -1 and abs(r - dr) + abs(c - dc) == 1:
+                return True
+        return False
 
     @staticmethod
     def _move_towards(pos, target) -> int:
@@ -81,15 +108,20 @@ def collect_episodes(
     grid_size: int = GRID_SIZE,
     door_positions=None,
     start_pos=START_POS,
+    enable_abstain: bool = False,
+    abstain_prob: float = 0.0,
+    abstain_penalty: float = -0.1,
+    random_abstain_prob: float = 0.05,
 ) -> list[dict]:
     """收集若干局数据，每局补齐到 max_steps，用 valid 标记真实步数。
 
     policy:
-      - "random"   : 纯随机动作（包含 ASK）
+      - "random"   : 纯随机动作（包含 ASK；启用 ABSTAIN 时按 random_abstain_prob 采样第 6 个动作）
       - "scripted" : 只用脚本策略
       - "mixed"    : 70% 脚本 + 30% 随机，兼顾覆盖和有效行为
 
     grid_size/door_positions/start_pos 默认值保持旧的 7x7 行为。
+    enable_abstain=False 时动作空间仍是 5 个，旧数据和旧 checkpoint 完全兼容。
     """
     env = HiddenGoalGrid(
         seed=seed,
@@ -97,6 +129,8 @@ def collect_episodes(
         grid_size=grid_size,
         door_positions=door_positions,
         start_pos=start_pos,
+        enable_abstain=enable_abstain,
+        abstain_penalty=abstain_penalty,
     )
     rng = np.random.default_rng(seed + 12_345)
     episodes = []
@@ -115,10 +149,23 @@ def collect_episodes(
         use_scripted = policy == "scripted" or (
             policy == "mixed" and rng.random() < 0.7
         )
-        scripted = ScriptedPolicy(rng) if use_scripted else None
+        scripted = (
+            ScriptedPolicy(rng, abstain_prob=abstain_prob) if use_scripted else None
+        )
 
         for t in range(max_steps):
-            action = scripted.act(env) if scripted else int(rng.integers(0, N_ACTIONS))
+            if scripted is not None:
+                action = scripted.act(env)
+            elif (
+                enable_abstain
+                and random_abstain_prob > 0
+                and rng.random() < random_abstain_prob
+            ):
+                action = ABSTAIN_ACTION
+            else:
+                # 随机策略默认在移动/ASK 动作中均匀采样；ABSTAIN 单独抽样，
+                # 避免随机局过早结束、训练数据过短。
+                action = int(rng.integers(0, env.n_actions - (1 if enable_abstain else 0)))
 
             # 存的是“执行动作前”的观测/消息，以及执行后的奖励
             obs_buf[t] = obs
@@ -161,7 +208,7 @@ class EpisodeDataset:
 
     def sample_batch(self, batch_size: int):
         """返回一个 batch 的 numpy 数组（训练脚本里再转成 torch）。"""
-        import torch  # 放在函数里，这样只读 env 时不需要 torch
+        import torch  # 延迟导入，读取环境时不加载 torch
 
         B, L = batch_size, self.seq_len
         obs = np.zeros((B, L, OBS_DIM), dtype=np.float32)
