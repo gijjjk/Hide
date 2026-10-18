@@ -1,0 +1,62 @@
+{
+  "args": {
+    "episodes": 3,
+    "policy": "planner",
+    "ask": "fixed",
+    "threshold": 0.5,
+    "ask_after": 0,
+    "sign_first": false,
+    "ask_cost": -0.05,
+    "wrong_penalty": -0.3,
+    "horizon": 4,
+    "samples": 8,
+    "gamma": 0.99,
+    "no_value": false,
+    "seed": 0,
+    "ask_prob": 0.5,
+    "sign_prob": 0.3,
+    "checkpoint": "experiments/checkpoints/_smoke.pt",
+    "out": "experiments/logs/_plan_smoke.json",
+    "render": false,
+    "verbose": false,
+    "smoke": true
+  },
+  "episodes": 3,
+  "success_rate": 0.0,
+  "avg_return": -0.8500000000000002,
+  "avg_steps": 40.0,
+  "ask_rate": 1.0,
+  "avg_ask_count": 1.0,
+  "sign_rate": 0.0,
+  "avg_planner_ms_per_step": 2.191323500413161,
+  "total_seconds": 0.28,
+  "per_episode": [
+    {
+      "return": -0.8500000000000002,
+      "steps": 40,
+      "success": false,
+      "ask_count": 1,
+      "sign_read": false,
+      "planner_ms": 1.9385692400810046,
+      "episode": 0
+    },
+    {
+      "return": -0.8500000000000002,
+      "steps": 40,
+      "success": false,
+      "ask_count": 1,
+      "sign_read": false,
+      "planner_ms": 2.2480182158641324,
+      "episode": 1
+    },
+    {
+      "return": -0.8500000000000002,
+      "steps": 40,
+      "success": false,
+      "ask_count": 1,
+      "sign_read": false,
+      "planner_ms": 2.387383045294346,
+      "episode": 2
+    }
+  ]
+}

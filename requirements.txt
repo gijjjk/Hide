@@ -1,0 +1,15 @@
+# AskDreamer 依赖（CPU 版）
+#
+# 推荐先单独安装 CPU 版 PyTorch：
+#   python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+# 然后再：
+#   python -m pip install -r requirements.txt
+#
+# 如果你的平台默认装到了 CUDA 版，也不影响本项目运行；
+# 本项目全程使用 CPU，不会调用 GPU。
+
+torch>=2.6
+numpy>=1.24
+matplotlib>=3.7
+
+# 测试使用纯 assert，不需要 pytest。

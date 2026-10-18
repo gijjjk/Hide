@@ -1,0 +1,485 @@
+{
+  "args": {
+    "episodes": 50,
+    "policy": "planner",
+    "ask": "voi",
+    "threshold": 0.5,
+    "ask_after": 0,
+    "sign_first": false,
+    "ask_cost": -0.4,
+    "wrong_penalty": -0.3,
+    "horizon": 8,
+    "samples": 32,
+    "gamma": 0.99,
+    "no_value": false,
+    "seed": 1,
+    "ask_prob": 0.5,
+    "sign_prob": 0.3,
+    "checkpoint": "experiments/checkpoints/world_model_nodec_s1.pt",
+    "out": "experiments/logs/h3_nosf_voi_high_s1.json",
+    "render": false,
+    "verbose": false,
+    "smoke": false
+  },
+  "episodes": 50,
+  "success_rate": 0.88,
+  "avg_return": 0.2389999999999998,
+  "avg_steps": 20.7,
+  "ask_rate": 0.74,
+  "avg_ask_count": 0.74,
+  "sign_rate": 0.5,
+  "avg_planner_ms_per_step": 5.367250091261424,
+  "total_seconds": 6.25,
+  "per_episode": [
+    {
+      "return": 0.5299999999999999,
+      "steps": 7,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": true,
+      "planner_ms": 5.361239115397136,
+      "episode": 0
+    },
+    {
+      "return": 0.09999999999999987,
+      "steps": 20,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": false,
+      "planner_ms": 4.994254363210578,
+      "episode": 1
+    },
+    {
+      "return": 0.3999999999999998,
+      "steps": 20,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": false,
+      "planner_ms": 5.62227399725663,
+      "episode": 2
+    },
+    {
+      "return": 0.89,
+      "steps": 11,
+      "success": true,
+      "ask_count": 0,
+      "sign_read": true,
+      "planner_ms": 5.380587144331499,
+      "episode": 3
+    },
+    {
+      "return": 0.2999999999999997,
+      "steps": 30,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": false,
+      "planner_ms": 4.222236830612709,
+      "episode": 4
+    },
+    {
+      "return": 0.3699999999999998,
+      "steps": 23,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": false,
+      "planner_ms": 4.7938715327869765,
+      "episode": 5
+    },
+    {
+      "return": 0.30999999999999983,
+      "steps": 39,
+      "success": true,
+      "ask_count": 0,
+      "sign_read": true,
+      "planner_ms": 4.240641227135291,
+      "episode": 6
+    },
+    {
+      "return": -0.8000000000000003,
+      "steps": 40,
+      "success": false,
+      "ask_count": 0,
+      "sign_read": false,
+      "planner_ms": 5.188661813735962,
+      "episode": 7
+    },
+    {
+      "return": 0.44999999999999984,
+      "steps": 15,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": true,
+      "planner_ms": 5.45414856501988,
+      "episode": 8
+    },
+    {
+      "return": 0.44999999999999984,
+      "steps": 15,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": false,
+      "planner_ms": 5.136268479483468,
+      "episode": 9
+    },
+    {
+      "return": 0.06999999999999984,
+      "steps": 23,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": true,
+      "planner_ms": 4.884904081171209,
+      "episode": 10
+    },
+    {
+      "return": 0.5299999999999999,
+      "steps": 7,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": true,
+      "planner_ms": 7.480820020039876,
+      "episode": 11
+    },
+    {
+      "return": 0.5099999999999999,
+      "steps": 9,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": true,
+      "planner_ms": 2.621173858642578,
+      "episode": 12
+    },
+    {
+      "return": 0.34999999999999976,
+      "steps": 25,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": false,
+      "planner_ms": 4.355629285176595,
+      "episode": 13
+    },
+    {
+      "return": 0.5099999999999999,
+      "steps": 9,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": false,
+      "planner_ms": 6.137937307357788,
+      "episode": 14
+    },
+    {
+      "return": 0.5199999999999999,
+      "steps": 8,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": false,
+      "planner_ms": 6.9624015263148715,
+      "episode": 15
+    },
+    {
+      "return": 0.07999999999999985,
+      "steps": 22,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": true,
+      "planner_ms": 5.5674371265229725,
+      "episode": 16
+    },
+    {
+      "return": 0.89,
+      "steps": 11,
+      "success": true,
+      "ask_count": 0,
+      "sign_read": false,
+      "planner_ms": 4.623218016190962,
+      "episode": 17
+    },
+    {
+      "return": 0.89,
+      "steps": 11,
+      "success": true,
+      "ask_count": 0,
+      "sign_read": true,
+      "planner_ms": 6.938154047185725,
+      "episode": 18
+    },
+    {
+      "return": -0.8000000000000002,
+      "steps": 40,
+      "success": false,
+      "ask_count": 0,
+      "sign_read": true,
+      "planner_ms": 6.4128100872039795,
+      "episode": 19
+    },
+    {
+      "return": 0.4999999999999999,
+      "steps": 10,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": false,
+      "planner_ms": 5.4973231421576605,
+      "episode": 20
+    },
+    {
+      "return": 0.9299999999999999,
+      "steps": 7,
+      "success": true,
+      "ask_count": 0,
+      "sign_read": false,
+      "planner_ms": 5.033390862601144,
+      "episode": 21
+    },
+    {
+      "return": 0.06999999999999984,
+      "steps": 23,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": true,
+      "planner_ms": 5.424813790754839,
+      "episode": 22
+    },
+    {
+      "return": 0.019999999999999796,
+      "steps": 28,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": false,
+      "planner_ms": 4.424466027153863,
+      "episode": 23
+    },
+    {
+      "return": 0.4299999999999998,
+      "steps": 17,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": false,
+      "planner_ms": 5.183383822441101,
+      "episode": 24
+    },
+    {
+      "return": 0.7799999999999999,
+      "steps": 22,
+      "success": true,
+      "ask_count": 0,
+      "sign_read": true,
+      "planner_ms": 4.822871901772239,
+      "episode": 25
+    },
+    {
+      "return": 0.039999999999999813,
+      "steps": 26,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": false,
+      "planner_ms": 5.603742599487305,
+      "episode": 26
+    },
+    {
+      "return": 0.4199999999999998,
+      "steps": 18,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": true,
+      "planner_ms": 5.820260328405044,
+      "episode": 27
+    },
+    {
+      "return": 0.44999999999999984,
+      "steps": 15,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": false,
+      "planner_ms": 5.051221166338239,
+      "episode": 28
+    },
+    {
+      "return": -0.8000000000000002,
+      "steps": 40,
+      "success": false,
+      "ask_count": 0,
+      "sign_read": false,
+      "planner_ms": 5.699169635772705,
+      "episode": 29
+    },
+    {
+      "return": 0.5199999999999999,
+      "steps": 8,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": false,
+      "planner_ms": 3.010545458112444,
+      "episode": 30
+    },
+    {
+      "return": 0.06999999999999984,
+      "steps": 23,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": false,
+      "planner_ms": 5.756031383167613,
+      "episode": 31
+    },
+    {
+      "return": 0.42999999999999994,
+      "steps": 27,
+      "success": true,
+      "ask_count": 0,
+      "sign_read": true,
+      "planner_ms": 5.524723618118851,
+      "episode": 32
+    },
+    {
+      "return": -1.2000000000000004,
+      "steps": 40,
+      "success": false,
+      "ask_count": 1,
+      "sign_read": false,
+      "planner_ms": 6.388676472199269,
+      "episode": 33
+    },
+    {
+      "return": 0.3999999999999998,
+      "steps": 20,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": true,
+      "planner_ms": 5.907322231091951,
+      "episode": 34
+    },
+    {
+      "return": -1.1000000000000003,
+      "steps": 40,
+      "success": false,
+      "ask_count": 0,
+      "sign_read": true,
+      "planner_ms": 5.207920074462891,
+      "episode": 35
+    },
+    {
+      "return": -0.9000000000000004,
+      "steps": 40,
+      "success": false,
+      "ask_count": 1,
+      "sign_read": true,
+      "planner_ms": 5.72353754288111,
+      "episode": 36
+    },
+    {
+      "return": 0.4099999999999998,
+      "steps": 19,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": true,
+      "planner_ms": 5.796962314181858,
+      "episode": 37
+    },
+    {
+      "return": 0.82,
+      "steps": 18,
+      "success": true,
+      "ask_count": 0,
+      "sign_read": true,
+      "planner_ms": 5.945192442999946,
+      "episode": 38
+    },
+    {
+      "return": 0.1499999999999999,
+      "steps": 15,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": true,
+      "planner_ms": 6.480080740792411,
+      "episode": 39
+    },
+    {
+      "return": 0.1399999999999999,
+      "steps": 16,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": true,
+      "planner_ms": 5.640443166097005,
+      "episode": 40
+    },
+    {
+      "return": 0.009999999999999787,
+      "steps": 29,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": true,
+      "planner_ms": 5.146341664450509,
+      "episode": 41
+    },
+    {
+      "return": 0.3999999999999998,
+      "steps": 20,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": true,
+      "planner_ms": 5.477553919741982,
+      "episode": 42
+    },
+    {
+      "return": 0.4199999999999998,
+      "steps": 18,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": true,
+      "planner_ms": 5.378849366131951,
+      "episode": 43
+    },
+    {
+      "return": 0.45999999999999985,
+      "steps": 14,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": false,
+      "planner_ms": 6.1679253211388225,
+      "episode": 44
+    },
+    {
+      "return": 0.09999999999999987,
+      "steps": 20,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": false,
+      "planner_ms": 5.325668736508018,
+      "episode": 45
+    },
+    {
+      "return": 0.05999999999999983,
+      "steps": 24,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": false,
+      "planner_ms": 5.414589591648268,
+      "episode": 46
+    },
+    {
+      "return": 0.95,
+      "steps": 5,
+      "success": true,
+      "ask_count": 0,
+      "sign_read": true,
+      "planner_ms": 5.816841125488281,
+      "episode": 47
+    },
+    {
+      "return": -0.010000000000000231,
+      "steps": 31,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": false,
+      "planner_ms": 4.672916730244954,
+      "episode": 48
+    },
+    {
+      "return": 0.4299999999999998,
+      "steps": 17,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": false,
+      "planner_ms": 4.6410709619522095,
+      "episode": 49
+    }
+  ]
+}

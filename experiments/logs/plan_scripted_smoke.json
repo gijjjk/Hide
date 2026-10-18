@@ -1,0 +1,57 @@
+{
+  "args": {
+    "episodes": 3,
+    "policy": "scripted",
+    "ask": "never",
+    "threshold": 0.5,
+    "horizon": 4,
+    "samples": 8,
+    "gamma": 0.99,
+    "seed": 0,
+    "ask_prob": 0.5,
+    "sign_prob": 0.3,
+    "checkpoint": "experiments/checkpoints/world_model.pt",
+    "out": "experiments/logs/plan_scripted_smoke.json",
+    "render": false,
+    "verbose": true,
+    "smoke": true
+  },
+  "episodes": 3,
+  "success_rate": 1.0,
+  "avg_return": 0.32,
+  "avg_steps": 14.666666666666666,
+  "ask_rate": 0.6666666666666666,
+  "avg_ask_count": 0.6666666666666666,
+  "sign_rate": 0.0,
+  "avg_planner_ms_per_step": 0.0,
+  "total_seconds": 0.0,
+  "per_episode": [
+    {
+      "return": 0.54,
+      "steps": 11,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": false,
+      "planner_ms": 0.0,
+      "episode": 0
+    },
+    {
+      "return": 0.22999999999999998,
+      "steps": 17,
+      "success": true,
+      "ask_count": 0,
+      "sign_read": false,
+      "planner_ms": 0.0,
+      "episode": 1
+    },
+    {
+      "return": 0.18999999999999995,
+      "steps": 16,
+      "success": true,
+      "ask_count": 1,
+      "sign_read": false,
+      "planner_ms": 0.0,
+      "episode": 2
+    }
+  ]
+}

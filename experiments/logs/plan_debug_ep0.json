@@ -1,0 +1,39 @@
+{
+  "args": {
+    "episodes": 1,
+    "policy": "planner",
+    "ask": "fixed",
+    "threshold": 0.5,
+    "horizon": 8,
+    "samples": 32,
+    "gamma": 0.99,
+    "seed": 0,
+    "ask_prob": 0.5,
+    "sign_prob": 0.3,
+    "checkpoint": "experiments/checkpoints/world_model_nodec.pt",
+    "out": "experiments/logs/plan_debug_ep0.json",
+    "render": true,
+    "verbose": true,
+    "smoke": false
+  },
+  "episodes": 1,
+  "success_rate": 0.0,
+  "avg_return": -0.5500000000000003,
+  "avg_steps": 40.0,
+  "ask_rate": 1.0,
+  "avg_ask_count": 1.0,
+  "sign_rate": 0.0,
+  "avg_planner_ms_per_step": 4.678249359130859,
+  "total_seconds": 0.2,
+  "per_episode": [
+    {
+      "return": -0.5500000000000003,
+      "steps": 40,
+      "success": false,
+      "ask_count": 1,
+      "sign_read": false,
+      "planner_ms": 4.678249359130859,
+      "episode": 0
+    }
+  ]
+}
