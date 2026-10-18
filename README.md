@@ -347,6 +347,77 @@ seed 1 的 `--abstain never` 成功率为 0.460，与 seed 0 的 0.480 接近。
 - `report/figures/ood_abstain_never_compare.png`
 - `report/figures/ood_abstain_compare.png`
 
+### 5.9 学习型询问门控（任务 3）
+
+规则式询问策略只看当前信念熵或信息价值，不直接学习“这次询问值不值”。
+任务 3 在世界模型里加一个 `ask_head`，输入当前潜状态 `(h, z)` 和询问成本，
+输出“现在值得询问”的概率。
+
+训练标签由 `askdreamer.data.ask_label(env)` 给出，它不使用隐藏门答案：
+
+- 已经问过，或剩余可选门不超过 1 扇：标签为 0；
+- 否则用顺序试门的期望错误次数 `(k-1)/2` 估算继续试门的成本，
+  与询问成本比较后给出 0/1 标签。
+
+训练数据按 episode 轮流使用不同的询问成本（默认
+`-0.02, -0.05, -0.2, -0.4`），所以同一个 `ask_head` 能覆盖多档成本。
+询问成本先乘以 `ask_cost_scale`（默认 20，即除以 `0.05`）再进入网络，
+训练和推理使用同一个系数；旧 checkpoint 没有该字段时按 1.0 处理。
+
+训练（不会覆盖旧 checkpoint）：
+
+```bash
+python steps/02_world_model.py --episodes 400 --steps 2000 --no-decoder \
+  --learned-ask --seed 0
+```
+
+输出：
+
+- `experiments/checkpoints/world_model_askhead.pt`
+- `experiments/logs/world_model_askhead_metrics.json`
+
+验证集指标（seed 0）：`reward_mae=0.081`、`belief_acc=0.933`、
+`ask_acc=0.993`、`ask_brier=0.007`。
+
+评估时用 `--ask learned`，门控在 `ask_count == 0` 且
+`ask_prob(h, z, |ask_cost|) > threshold` 时选择 ASK：
+
+```bash
+python steps/03_plan.py --episodes 100 --samples 32 --horizon 8 \
+  --ask learned --threshold 0.5 --ask-cost -0.4 \
+  --checkpoint experiments/checkpoints/world_model_askhead.pt \
+  --out experiments/logs/ask_learned_c04.json
+```
+
+同一 checkpoint，seed 0，100 局，7×7，比较不同询问成本
+（成功率 / 平均回报 / 询问率）：
+
+| 询问成本 | never | fixed | entropy | voi | learned |
+|---:|---:|---:|---:|---:|---:|
+| 0.05 | 0.520 / -0.031 / 0.000 | 0.840 / 0.459 / 1.000 | 0.840 / 0.459 / 1.000 | 0.840 / 0.459 / 1.000 | 0.840 / 0.459 / 1.000 |
+| 0.20 | 0.520 / -0.031 / 0.000 | 0.840 / 0.309 / 1.000 | 0.840 / 0.309 / 1.000 | 0.840 / 0.309 / 1.000 | 0.840 / 0.300 / 1.000 |
+| 0.40 | 0.520 / -0.031 / 0.000 | 0.840 / 0.109 / 1.000 | 0.840 / 0.109 / 1.000 | 0.850 / 0.116 / 0.970 | 0.520 / -0.031 / 0.000 |
+| 1.00 | 0.520 / -0.031 / 0.000 | 0.840 / -0.491 / 1.000 | 0.840 / -0.491 / 1.000 | 0.520 / -0.031 / 0.000 | 0.520 / -0.031 / 0.000 |
+
+结论与局限：
+
+- 学习型门控确实随成本改变行为：成本 0.05/0.20 时每局都询问，0.40 和 1.00
+  时完全不询问，决策边界落在 0.2 与 0.4 之间，与标签规则约 0.31 的边界接近。
+- 成本 0.05 和 0.20 时，learned 与 fixed/entropy/voi 的成功率、询问率一致；
+  成本 1.00 时 learned 与 voi 都不询问，而 fixed/entropy 仍然每局询问，
+  后者因此多付 1.0 的询问成本（平均回报 -0.491）。
+- 成本 0.40 时 learned 不询问，但在这个环境里询问仍然更划算
+  （fixed 0.109，voi 0.116，never -0.031）。原因是 `ask_label` 只比较
+  错门罚分和询问成本，忽略了成功奖励以及规划器无信息时更高的超时概率，
+  因而低估了信息的价值。学习型门控忠实复现了标签，也继承了这一偏差。
+  若要修正，需要把成功奖励或实际回报纳入标签，而不是只改 ask_head。
+
+输出文件：
+
+- `experiments/logs/ask_learned_c005.json`、`ask_learned_c02.json`、
+  `ask_learned_c04.json`、`ask_learned_c10.json`
+- `experiments/logs/ask_compare_askhead_c005.json` 等对应的规则策略对比
+
 ---
 
 ## 6. 目录结构
@@ -361,7 +432,7 @@ D:\hide\
     model.py                 # Encoder + RSSM + 奖励/信念/价值/JEPA 头
     train.py                 # 训练、评估、线性探针、有效秩
     planner.py               # 随机 shooting 潜空间规划器
-    controller.py            # never / fixed / entropy / VOI / sign-first
+    controller.py            # never / fixed / entropy / VOI / learned / abstain
   tutorials/                 # 给 Python 不熟的人的最小基础
     01_python_basics.py
     02_tensor_autograd.py
@@ -380,6 +451,7 @@ D:\hide\
     test_env.py              # 环境自检（9 项）
     test_env_grid.py         # 网格尺寸参数化回归测试
     test_abstain.py          # ABSTAIN 动作与弃权门控测试
+    test_learned_ask.py      # 学习型询问门控（ask_head）测试
     test_shapes.py           # 张量形状/前向/反向/规划器/控制器自检
     test_overfit.py          # 小 batch 过拟合，确认模型能学
   report/

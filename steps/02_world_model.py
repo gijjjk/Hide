@@ -1,11 +1,15 @@
 """
-第 1 步：训练潛状态世界模型。
+第 1 步：训练潜状态世界模型。
 
-先跑带解码器的版本（1a，最稳）：
+带解码器：
     python steps/02_world_model.py --episodes 400 --steps 2000
 
-再跑无解码器版本（1b，你的核心主张）做对照：
+无解码器：
     python steps/02_world_model.py --episodes 400 --steps 2000 --no-decoder
+
+学习型询问门控（在无解码器模型上加 ask_head）：
+    python steps/02_world_model.py --episodes 400 --steps 2000 --no-decoder \
+      --learned-ask
 
 冒烟测试（1 分钟内）：
     python steps/02_world_model.py --smoke
@@ -17,7 +21,8 @@
 输出：
     experiments/checkpoints/world_model.pt
     experiments/logs/world_model_metrics.json
-    （启用 ABSTAIN 时默认是 world_model_abstain.pt / world_model_abstain_metrics.json）
+    （启用 ABSTAIN 时默认是 world_model_abstain.pt / world_model_abstain_metrics.json，
+      启用 --learned-ask 时默认是 world_model_askhead.pt / world_model_askhead_metrics.json）
 """
 
 from __future__ import annotations
@@ -85,6 +90,29 @@ def parse_args():
         default=0.05,
         help="随机策略每个非脚本步选择 ABSTAIN 的概率（仅 6 动作模式）",
     )
+    p.add_argument(
+        "--learned-ask",
+        action="store_true",
+        help="给世界模型加 ask_head，用 data.ask_label 监督学习型询问门控",
+    )
+    p.add_argument(
+        "--ask-costs",
+        type=str,
+        default="-0.02,-0.05,-0.2,-0.4",
+        help="训练数据中轮流使用的询问成本（逗号分隔，仅 --learned-ask 时生效）",
+    )
+    p.add_argument(
+        "--learned-ask-weight",
+        type=float,
+        default=0.2,
+        help="ask_head 损失权重",
+    )
+    p.add_argument(
+        "--ask-cost-scale",
+        type=float,
+        default=20.0,
+        help="ask_head 输入成本的缩放系数（1/0.05=20，仅 --learned-ask 时生效）",
+    )
     p.add_argument("--smoke", action="store_true", help="几十步跑通流程，不追求效果")
     p.add_argument(
         "--out",
@@ -112,12 +140,20 @@ def main():
         args.log_every = 5
         args.eval_batches = 2
 
-    # 默认输出：启用 ABSTAIN 时换新文件，绝不覆盖旧的 5 动作 checkpoint
-    suffix = "_abstain" if args.enable_abstain else ""
+    # 默认输出：启用 ABSTAIN / ask_head 时换新文件，绝不覆盖旧 checkpoint
+    suffix = ""
+    if args.enable_abstain:
+        suffix += "_abstain"
+    if args.learned_ask:
+        suffix += "_askhead"
     if args.out is None:
         args.out = f"experiments/checkpoints/world_model{suffix}.pt"
     if args.metrics_out is None:
         args.metrics_out = f"experiments/logs/world_model{suffix}_metrics.json"
+
+    ask_costs = None
+    if args.learned_ask:
+        ask_costs = [float(x) for x in args.ask_costs.split(",") if x.strip()]
 
     n_actions = N_ACTIONS_WITH_ABSTAIN if args.enable_abstain else N_ACTIONS
 
@@ -144,6 +180,7 @@ def main():
         abstain_prob=args.abstain_prob,
         abstain_penalty=args.abstain_penalty,
         random_abstain_prob=args.random_abstain_prob,
+        ask_costs=ask_costs,
     )
     print(f"收集完成，用时 {time.time() - t0:.1f} 秒，共 {len(episodes)} 局。")
 
@@ -160,6 +197,8 @@ def main():
         msg_dim=MSG_DIM,
         n_actions=n_actions,
         use_decoder=not args.no_decoder,
+        use_ask_head=args.learned_ask,
+        ask_cost_scale=args.ask_cost_scale if args.learned_ask else 1.0,
     )
     print(f"\n模型参数量（可训练）：{count_parameters(model):,}")
     print(f"是否使用观测解码器：{not args.no_decoder}")
@@ -174,6 +213,7 @@ def main():
         batch_size=args.batch,
         lr=args.lr,
         log_every=args.log_every,
+        ask_w=args.learned_ask_weight,
     )
     train_seconds = time.time() - t_train
 
@@ -192,6 +232,8 @@ def main():
         "value_mae",
         "belief_acc",
         "brier",
+        "ask_acc",
+        "ask_brier",
         "jepa_cos",
         "kl",
         "kl_raw",
@@ -215,12 +257,15 @@ def main():
         "h_dim": 96,
         "z_dim": 16,
         "use_decoder": not args.no_decoder,
+        "use_ask_head": args.learned_ask,
+        "ask_cost_scale": args.ask_cost_scale if args.learned_ask else 1.0,
     }
     env_config = {
         "grid_size": args.grid_size,
         "max_steps": args.max_steps,
         "enable_abstain": args.enable_abstain,
         "abstain_penalty": args.abstain_penalty,
+        "ask_costs": ask_costs,
     }
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)

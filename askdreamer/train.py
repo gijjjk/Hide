@@ -44,6 +44,7 @@ def train_world_model(
     log_every: int = 100,
     ema: float = 0.99,
     device: str = "cpu",
+    ask_w: float = 0.2,
 ) -> list[dict]:
     """返回训练日志列表，每个元素是一组标量指标。"""
     model.to(device)
@@ -65,7 +66,7 @@ def train_world_model(
         batch = first_batch if step == 1 else dataset.sample_batch(batch_size)
         batch = {k: v.to(device) for k, v in batch.items()}
 
-        loss, metrics = model.compute_losses(batch)
+        loss, metrics = model.compute_losses(batch, ask_w=ask_w)
 
         if not torch.isfinite(loss):
             raise RuntimeError(
@@ -82,6 +83,11 @@ def train_world_model(
             row = {"step": step, **{k: float(v) for k, v in metrics.items()}}
             row["elapsed_sec"] = round(time.time() - t0, 1)
             history.append(row)
+            ask_note = (
+                f" | ask_acc {row['ask_acc']:.3f} | ask_brier {row['ask_brier']:.3f}"
+                if getattr(model, "use_ask_head", False)
+                else ""
+            )
             print(
                 f"step {step:5d} | loss {row['loss']:.4f} | "
                 f"reward_mae {row['reward_mae']:.4f} | "
@@ -91,6 +97,7 @@ def train_world_model(
                 f"jepa_cos {row['jepa_cos']:.3f} | "
                 f"kl {row['kl']:.2f} | kl_raw {row['kl_raw']:.2f} | "
                 f"active {row['active_dims']:.1f} | z_std {row['z_std']:.3f}"
+                + ask_note
             )
 
     print(f"\n训练完成，用时 {time.time() - t0:.1f} 秒。")

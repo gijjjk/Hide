@@ -94,6 +94,8 @@ class WorldModel(nn.Module):
         h_dim: int = 96,
         z_dim: int = 16,
         use_decoder: bool = True,
+        use_ask_head: bool = False,
+        ask_cost_scale: float = 1.0,
     ):
         super().__init__()
         self.obs_dim = obs_dim
@@ -103,6 +105,9 @@ class WorldModel(nn.Module):
         self.h_dim = h_dim
         self.z_dim = z_dim
         self.use_decoder = use_decoder
+        self.use_ask_head = use_ask_head
+        # 询问成本先乘这个系数再进入 ask_head；训练和推理必须一致
+        self.ask_cost_scale = ask_cost_scale
 
         self.encoder = Encoder(obs_dim, e_dim)
 
@@ -135,6 +140,16 @@ class WorldModel(nn.Module):
             nn.Linear(feat_dim + n_actions, 128),
             nn.SiLU(),
             nn.Linear(128, e_dim),
+        )
+        # 询问门控头：输入 (h,z) 和 |询问成本|，输出“现在询问是否值得”的 logit
+        self.ask_head = (
+            nn.Sequential(
+                nn.Linear(feat_dim + 1, 64),
+                nn.SiLU(),
+                nn.Linear(64, 1),
+            )
+            if use_ask_head
+            else None
         )
         self.decoder = (
             nn.Sequential(
@@ -244,6 +259,15 @@ class WorldModel(nn.Module):
         a_onehot = F.one_hot(action, self.n_actions).float()
         return self.reward_head(torch.cat([feat, a_onehot], dim=-1)).squeeze(-1)
 
+    @torch.no_grad()
+    def ask_prob(self, h: torch.Tensor, z: torch.Tensor, cost: torch.Tensor) -> torch.Tensor:
+        """返回“值得询问”的概率。cost 是询问成本绝对值，shape (B,) 或 (B,1)。"""
+        if self.ask_head is None:
+            raise RuntimeError("该模型没有 ask_head，请用 --learned-ask 重新训练")
+        feat = torch.cat([h, z], dim=-1)
+        cost = cost.reshape(-1, 1).to(feat.dtype) * self.ask_cost_scale
+        return torch.sigmoid(self.ask_head(torch.cat([feat, cost], dim=-1))).squeeze(-1)
+
     # ---------- 目标编码器 EMA ----------
     @torch.no_grad()
     def update_target(self, decay: float = 0.99):
@@ -264,6 +288,7 @@ class WorldModel(nn.Module):
         kl_w: float = 0.1,
         var_w: float = 0.1,
         recon_w: float = 0.5,
+        ask_w: float = 0.2,
     ):
         obs = batch["obs"]            # (B,L,150)
         msg = batch["msg"]            # (B,L,6)
@@ -302,6 +327,17 @@ class WorldModel(nn.Module):
         loss_value = masked_mean(
             F.smooth_l1_loss(value_pred, returns, reduction="none"), valid
         )
+
+        # 2c) 学习型询问门控：输入 (h,z,|ask_cost|)，监督标签来自 data.ask_label
+        ask_logit = None
+        loss_ask = torch.zeros((), device=obs.device)
+        if self.ask_head is not None and "ask_label" in batch:
+            cost = batch["cost"].abs().unsqueeze(-1) * self.ask_cost_scale  # (B,L,1)
+            ask_logit = self.ask_head(torch.cat([feat, cost], dim=-1)).squeeze(-1)
+            ask_bce = F.binary_cross_entropy_with_logits(
+                ask_logit, batch["ask_label"], reduction="none"
+            )
+            loss_ask = masked_mean(ask_bce, valid)
 
         # 3) JEPA：用 (h_t,z_t,a_t) 预测下一时刻的观测嵌入 e_{t+1}
         pred_e = self.jepa_head(
@@ -350,11 +386,13 @@ class WorldModel(nn.Module):
             + kl_w * loss_kl
             + var_w * loss_var
             + recon_w * loss_recon
+            + ask_w * loss_ask
         )
 
         # 监控指标（不参与梯度）
         with torch.no_grad():
             mask = valid.bool()
+            zero = torch.zeros((), device=obs.device)
             if mask.any():
                 reward_mae = (r_pred[mask] - rew[mask]).abs().mean()
                 belief_acc = (logits[mask].argmax(-1) == goal[mask]).float().mean()
@@ -368,10 +406,17 @@ class WorldModel(nn.Module):
                 post_std = torch.exp(0.5 * logvar_q)[mask].mean()
                 prior_std = torch.exp(0.5 * logvar_p)[mask].mean()
                 z_std = z[mask].std(dim=0).mean()
+                if ask_logit is not None:
+                    ask_p = torch.sigmoid(ask_logit[mask])
+                    ask_target = batch["ask_label"][mask]
+                    ask_acc = ((ask_p > 0.5).float() == ask_target).float().mean()
+                    ask_brier = ((ask_p - ask_target) ** 2).mean()
+                else:
+                    ask_acc = ask_brier = zero
             else:
-                zero = torch.zeros((), device=obs.device)
                 reward_mae = belief_acc = brier = kl_total = zero
                 value_mae = kl_raw_total = active_dims = post_std = prior_std = z_std = zero
+                ask_acc = ask_brier = zero
 
             jepa_mask = valid_next[:, :-1].bool()
             if jepa_mask.any():
@@ -388,10 +433,13 @@ class WorldModel(nn.Module):
             "loss_kl": loss_kl.detach(),
             "loss_var": loss_var.detach(),
             "loss_recon": loss_recon.detach(),
+            "loss_ask": loss_ask.detach(),
             "reward_mae": reward_mae,
             "value_mae": value_mae,
             "belief_acc": belief_acc,
             "brier": brier,
+            "ask_acc": ask_acc,
+            "ask_brier": ask_brier,
             "jepa_cos": jepa_cos,
             "kl": kl_total,
             "kl_raw": kl_raw_total,

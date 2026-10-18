@@ -109,7 +109,7 @@ def parse_args():
         "--ask",
         type=str,
         default="never",
-        choices=["never", "fixed", "entropy", "voi"],
+        choices=["never", "fixed", "entropy", "voi", "learned"],
         help="默认不问，让信念只能来自观测/历史；想看询问行为时用 entropy/voi",
     )
     p.add_argument("--threshold", type=float, default=0.5)
@@ -514,6 +514,10 @@ def main():
     print("=" * 60)
 
     model, ckpt_config = load_world_model(args.checkpoint)
+    if args.ask == "learned" and ckpt_config.get("use_ask_head") is not True:
+        raise SystemExit(
+            "该 checkpoint 没有 ask_head；请用 steps/02_world_model.py --learned-ask 重新训练"
+        )
 
     train_summary = eval_condition(model, args.train_grid, args, "train")
     test_summary = eval_condition(model, args.test_grid, args, "test")

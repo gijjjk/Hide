@@ -57,7 +57,12 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--episodes", type=int, default=100)
     p.add_argument("--policy", type=str, default="planner", choices=["planner", "random", "scripted"])
-    p.add_argument("--ask", type=str, default="never", choices=["never", "fixed", "entropy", "voi"])
+    p.add_argument(
+        "--ask",
+        type=str,
+        default="never",
+        choices=["never", "fixed", "entropy", "voi", "learned"],
+    )
     p.add_argument("--threshold", type=float, default=0.5, help="熵门控阈值（nat）")
     p.add_argument("--ask-after", type=int, default=0, help="至少走多少步后才允许询问")
     p.add_argument("--sign-first", action="store_true", help="先读告示牌，再决定是否询问")
@@ -286,6 +291,12 @@ def main():
             use_value=not args.no_value,
         )
         ask_policy = make_ask_policy(args.ask, args.threshold, args.ask_after)
+        if args.ask == "learned" and ckpt_config.get("use_ask_head") is not True:
+            print(
+                "\n该 checkpoint 没有 ask_head。请用 --learned-ask 重新训练：\n"
+                "  python steps/02_world_model.py --learned-ask ..."
+            )
+            sys.exit(1)
         if args.sign_first:
             ask_policy = SignFirstController(ask_policy)
         abstain_policy = (

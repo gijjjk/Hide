@@ -6,6 +6,7 @@
     fixed   : 第一次有机会就问
     entropy : 信念熵超过阈值才问
     voi     : 信息价值 > 询问成本才问
+    learned : 世界模型的 ask_head 决定是否问（需要 --learned-ask 训练的 checkpoint）
 
 用法（在 D:\\hide 下）：
     # 低询问成本，四个策略全比
@@ -44,8 +45,8 @@ def parse_args():
         "--policy",
         type=str,
         default="all",
-        choices=["all", "never", "fixed", "entropy", "voi"],
-        help="要比较的询问策略；all = 四个都跑",
+        choices=["all", "never", "fixed", "entropy", "voi", "learned"],
+        help="要比较的询问策略；all = 原来的四个规则策略",
     )
     p.add_argument("--episodes", type=int, default=50)
     p.add_argument("--threshold", type=float, default=0.8, help="熵门控阈值（nat）")

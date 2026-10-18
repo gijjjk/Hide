@@ -1,11 +1,12 @@
 """
-询问 / 弃权策略（v1 规则版）。
+询问与弃权策略。
 
 询问：
 - NeverAsk：从不询问；
 - FixedAsk：第一步必问；
 - EntropyGate：信念熵超过阈值才问，且每局最多问一次；
-- VOIGate：期望试错成本高于询问成本才问。
+- VOIGate：期望试错成本高于询问成本才问；
+- LearnedAsk：用世界模型的 ask_head（输入潜状态和询问成本）决定是否询问。
 
 弃权（仅在 env.enable_abstain=True 的 6 动作模式下生效）：
 - NeverAbstain / EntropyAbstain / VOIAbstain。
@@ -142,6 +143,36 @@ class SignFirstController:
         return f"SignFirstController({self.ask_policy!r})"
 
 
+class LearnedAsk:
+    """用模型自带的 ask_head 决定是否询问。
+
+    ask_head 的输入是潜状态 (h,z) 和当前询问成本 |ask_cost|；
+    训练标签由 data.ask_label() 根据当前状态生成。
+    """
+
+    name = "learned"
+
+    def __init__(self, threshold: float = 0.5, min_steps: int = 0):
+        self.threshold = threshold
+        self.min_steps = min_steps
+
+    def should_ask(self, model, h, z, env) -> bool:
+        if env.ask_count > 0:
+            return False
+        if env.steps < self.min_steps:
+            return False
+        if getattr(model, "ask_head", None) is None:
+            raise RuntimeError(
+                "checkpoint 没有 ask_head；请用 steps/02_world_model.py --learned-ask 重新训练"
+            )
+        cost = torch.tensor([abs(env.ask_cost)], dtype=h.dtype, device=h.device)
+        prob = float(model.ask_prob(h, z, cost).item())
+        return prob > self.threshold
+
+    def __repr__(self):
+        return f"LearnedAsk(threshold={self.threshold}, min_steps={self.min_steps})"
+
+
 def make_ask_policy(name: str, threshold: float = 0.5, min_steps: int = 0):
     if name == "never":
         return NeverAsk()
@@ -151,6 +182,8 @@ def make_ask_policy(name: str, threshold: float = 0.5, min_steps: int = 0):
         return EntropyGate(threshold, min_steps)
     if name == "voi":
         return VOIGate()
+    if name == "learned":
+        return LearnedAsk(threshold, min_steps)
     raise ValueError(f"未知的询问策略：{name}")
 
 
